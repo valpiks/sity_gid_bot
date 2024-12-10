@@ -6,13 +6,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 main = ReplyKeyboardMarkup(keyboard=
 [
-	[KeyboardButton(text="Указать предпочтения"),
+	[KeyboardButton(text="Популярные места в Ростове"),
 	KeyboardButton(text="Скидки и акции")],
 	[KeyboardButton(text="Отправить геолокацию", request_location=True),
 	KeyboardButton(text="Настройки")],
 	[KeyboardButton(text="Подписаться на уведомления"),
 	KeyboardButton(text="Отписаться от уведомлений")],
-	[KeyboardButton(text=""),
+	[KeyboardButton(text="Указать предпочтения"),
   KeyboardButton(text="Построить маршрут")]
 ],
 	resize_keyboard=True)

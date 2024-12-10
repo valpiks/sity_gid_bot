@@ -1,19 +1,20 @@
-from aiogram import F, Router
-from aiogram.types import Message
-from aiogram.filters import CommandStart, Command
-import asyncpg
 import app.keyboard as kb
 from database.module import DATABASE_URL
 import openai
 import requests
-
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import CommandStart
+import asyncpg
+import asyncio
 
 router = Router()
 
 YANDEX_MAPS_API_KEY = "a6e233d2-92d2-4db9-a6a7-34a7313d672e"
-openai.api_key = "sk-mnopqrstuvwxabcdmnopqrstuvwxabcdmnopqrst"
 
+openai.api_key = "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"
 
+API_URL = f"https://search-maps.yandex.ru/v1/?text=популярные места Ростов-на-Дону&lang=ru_RU&apikey={YANDEX_MAPS_API_KEY}"
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
@@ -23,8 +24,7 @@ async def cmd_start(message: Message):
     if not user:
         await conn.execute("INSERT INTO users (user_id, subscribed) VALUES ($1, $2)", user_id, False)
     await conn.close()
-    await message.answer("Привет! Я бот-гид для Ростова-на-Дону. Для подборки ближайших мест инетерсных тебе нужно отправить мне геолокацию. Чем могу помочь?", reply_markup= kb.main)
-
+    await message.answer("Привет! Я бот-гид для Ростова-на-Дону. Для подборки ближайших мест инетерсных тебе нужно отправить мне геолокацию. Чем могу помочь?", reply_markup=kb.main)
 
 @router.message(F.text == "Подписаться на уведомления")
 async def subscribe(message: Message):
@@ -52,6 +52,62 @@ async def handle_location(message: Message):
     preferences = await conn.fetchval("SELECT preferences FROM users WHERE user_id = $1", user_id)
     await conn.close()
 
+# Функция для обновления данных из API
+async def update_data():
+    while True:
+        try:
+            # Запрос к API
+            response = requests.get(API_URL)
+            data = response.json()
+
+            # Сохранение данных в базу данных
+            conn = await asyncpg.connect(DATABASE_URL)
+            await conn.execute("DELETE FROM events")  # Очищаем таблицу перед обновлением
+            for event in data.get("features", []):  # Исправлено: обрабатываем "features"
+                title = event["properties"]["name"]
+                description = event["properties"].get("description", "Нет описания")
+                await conn.execute("""
+                INSERT INTO events (type, title, description) VALUES ($1, $2, $3)
+                """, "place", title, description)
+            await conn.close()
+
+            print("Данные обновлены")
+        except Exception as e:
+            print(f"Ошибка при обновлении данных: {e}")
+
+        # Обновление данных каждые 60 минут
+        await asyncio.sleep(3600)
+
+# Обработчик запроса популярных мест
+@router.message(F.text == "Популярные места в Ростове")
+async def popular_places(message: Message):
+    conn = await asyncpg.connect(DATABASE_URL)
+    places = await conn.fetch("SELECT title, description FROM events WHERE type = 'place'")
+    await conn.close()
+
+    if places:
+        response = "Популярные места в Ростове:\n"
+        for idx, place in enumerate(places, start=1):
+            response += f"{idx}. {place['title']} - {place['description']}\n"
+        await message.answer(response)
+    else:
+        await message.answer("Нет данных о популярных местах.")
+
+# Обработчик запроса скидок и акций
+@router.message(F.text == "Скидки и акции")
+async def discounts(message: Message):
+    conn = await asyncpg.connect(DATABASE_URL)
+    discounts = await conn.fetch("SELECT title, description FROM events WHERE type = 'discount'")
+    await conn.close()
+
+    if discounts:
+        response = "Скидки и акции в Ростове:\n"
+        for idx, discount in enumerate(discounts, start=1):
+            response += f"{idx}. {discount['title']} - {discount['description']}\n"
+        await message.answer(response)
+    else:
+        await message.answer("Нет данных о скидках и акциях.")
+
 # Обработчик указания предпочтений
 @router.message(F.text == "Указать предпочтения")
 async def set_preferences(message: Message):
@@ -63,13 +119,16 @@ async def save_preferences(message: Message):
     user_id = message.from_user.id
     preferences = message.text
 
-    # Анализируем предпочтения с помощью OpenAI
-    ai_response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=f"Определи типы мест из текста: {preferences}",
+    # Анализируем предпочтения с помощью OpenAI (используем gpt-3.5-turbo)
+    ai_response = openai.ChatCompletion.create(
+        model="gpt-4",  # Используем современную модель
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": f"Определи типы мест из текста: {preferences}"}
+        ],
         max_tokens=50
     )
-    ai_preferences = ai_response.choices[0].text.strip()
+    ai_preferences = ai_response.choices[0].message.content.strip()
 
     # Сохраняем предпочтения в базе данных
     conn = await asyncpg.connect(DATABASE_URL)
@@ -78,20 +137,6 @@ async def save_preferences(message: Message):
 
     await message.answer(f"Ваши предпочтения сохранены: {ai_preferences}")
 
-
-@router.message(F.text == "Построить маршрут")
-async def build_route(message: Message):
-    user_id = message.from_user.id
-    conn = await asyncpg.connect(DATABASE_URL)
-    user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-    await conn.close()
-
-    if not user or user['latitude'] is None or user['longitude'] is None:
-        await message.answer("Пожалуйста, сначала отправьте вашу геолокацию.")
-        return
-
-
-# Обработчик построения маршрута
 @router.message(F.text == "Построить маршрут")
 async def build_route(message: Message):
     user_id = message.from_user.id
