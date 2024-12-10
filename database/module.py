@@ -1,38 +1,27 @@
-import psycopg2
-from config import host, user, password, db_name
+from database.config import host, user, password, db_name
+import asyncpg
 
-connection = None
+DATABASE_URL = f"postgresql://{user}:{password}@{host}:5432/{db_name}"
 
-try:
-    connection = psycopg2.connect(
-        host=host,
-        user=user,
-        password=password,
-        database=db_name,
-        options="-c client_encoding=utf8"
+
+async def create_table():
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)
+        
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        subscribed BOOLEAN DEFAULT FALSE,
+        preferences TEXT DEFAULT '',
+        latitude FLOAT DEFAULT NULL,
+        longitude FLOAT DEFAULT NULL
     )
-    connection.autocommit = True
-
-
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT version();")
-        server_version = cursor.fetchone()
-        print(f"Server version: {server_version[0]}")
-
-
-    with connection.cursor() as cursor:
-        cursor.execute("""CREATE TABLE users(
-                       id serial PRIMARY KEY,
-                       first_name varchar(50) NOT NULL,
-                       nick_name varchar(50) NOT NULL);"""
-        )
+    ''')
+        
+        await conn.close()
         
         print("[INFO] Table created successfully")
     
+    except Exception as ex:
+        print("[ERROR] Error while working with PostgreSQL:", ex)
 
-except Exception as ex:
-    print("[error] Error while working with PostgreSQL:", ex)
-finally:
-    if connection:
-        connection.close() 
-        print("Connection closed.")
