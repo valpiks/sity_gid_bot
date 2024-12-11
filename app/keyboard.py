@@ -1,5 +1,5 @@
 from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton,
-                           InlineKeyboardMarkup, InlineKeyboardButton)
+                           )
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -7,9 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 main = ReplyKeyboardMarkup(keyboard=
 [
 	[KeyboardButton(text="Популярные места в Ростове"),
-	KeyboardButton(text="Скидки и акции")],
-	[KeyboardButton(text="Отправить геолокацию", request_location=True),],
-	[KeyboardButton(text="Указать предпочтения"),
+	KeyboardButton(text="Указать предпочтения")],
+	[KeyboardButton(text="Отправить геолокацию", request_location=True),
   KeyboardButton(text="Составить маршрут")]
 ],
 	resize_keyboard=True)

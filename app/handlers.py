@@ -6,13 +6,46 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 import asyncpg
-from app.URL import OPENROUTESERVICE_API_KEY, FOURSQUARE_API_KEY
+from app.URL import OPENROUTESERVICE_API_KEY, API_KEY
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-
+from bs4 import BeautifulSoup
 
 router = Router()
+
+
+# Функция для парсинга данных с 2ГИС
+def parse_2gis(query, city="Ростов-на-Дону"):
+    url = "https://catalog.api.2gis.com/3.0/items"
+    params = {
+        "q": query,  # Поисковый запрос
+        "city": city,  # Город
+        "key": API_KEY,  # API-ключ
+        "page_size": 10  # Количество результатов на странице
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Пример парсинга (зависит от структуры страницы)
+        places = []
+        for item in soup.find_all("div", class_="_1tfwnxl"):
+            name = item.find("h1", class_="_cwjbox").text.strip()
+            address = item.find("span", class_="_er2xx9").text.strip()
+            rating = item.find("div", class_="_y10azs")
+            rating = float(rating.text.strip()) if rating else 0.0
+            places.append({
+                "name": name,
+                "address": address,
+                "rating": rating
+            })
+
+        return places
+    except Exception as e:
+        print(f"Ошибка при парсинге 2ГИС: {e}")
+        return []
 
 
 @router.message(CommandStart())
@@ -26,8 +59,6 @@ async def cmd_start(message: Message):
     await message.answer("Привет! Я бот-гид для Ростова-на-Дону. Для подборки ближайших мест интересных тебе нужно отправить мне геолокацию. Чем могу помочь?", reply_markup=kb.main)
 
 
-
-
 @router.message(Command("subscribe"))
 async def subscribe(message: Message):
     user_id = message.from_user.id
@@ -37,8 +68,6 @@ async def subscribe(message: Message):
     await message.answer("Вы подписались на уведомления о новых трендах, скидках и популярных местах!")
 
 
-
-
 @router.message(Command("unsubscribe"))
 async def unsubscribe(message: Message):
     user_id = message.from_user.id
@@ -46,8 +75,6 @@ async def unsubscribe(message: Message):
     await conn.execute("UPDATE users SET subscribed = FALSE WHERE user_id = $1", user_id)
     await conn.close()
     await message.answer("Вы отписались от уведомлений.")
-
-
 
 
 @router.message(F.location)
@@ -62,8 +89,6 @@ async def handle_location(message: Message):
     await message.answer("Ваша геолокация сохранена.")
 
 
-
-
 @router.message(F.text == "Построить маршрут")
 async def build_route(message: Message):
     user_id = message.from_user.id
@@ -75,15 +100,11 @@ async def build_route(message: Message):
         await message.answer("Пожалуйста, сначала отправьте вашу геолокацию.")
         return
 
-    # Получаем координаты пользователя
     user_latitude = user['latitude']
     user_longitude = user['longitude']
-
-    # Пример места назначения (например, Ростовский кремль)
     destination_latitude = 47.222078
     destination_longitude = 39.720349
 
-    # Построение маршрута с помощью OpenRouteService API
     route_url = f"https://api.openrouteservice.org/v2/directions/driving-car/geojson"
     headers = {
         "Authorization": OPENROUTESERVICE_API_KEY,
@@ -103,14 +124,10 @@ async def build_route(message: Message):
 
         if route_data.get("features"):
             route = route_data["features"][0]["properties"]
-            duration = route["summary"]["duration"]  # Время в секундах
-            distance = route["summary"]["distance"]  # Расстояние в метрах
-
-            # Преобразование времени в минуты и расстояния в километры
+            duration = route["summary"]["duration"]
+            distance = route["summary"]["distance"]
             duration_minutes = duration / 60
             distance_km = distance / 1000
-
-            # Формируем ссылку на карту с маршрутом
             map_url = f"https://www.openstreetmap.org/directions?engine=osrm_car&route={user_latitude},{user_longitude}-{destination_latitude},{destination_longitude}"
 
             await message.answer(f"Маршрут построен:\n"
@@ -123,147 +140,29 @@ async def build_route(message: Message):
         await message.answer(f"Ошибка при построении маршрута: {e}")
 
 
-
-
-# Обработчик запроса популярных мест
-@router.message(F.text == "Популярные места в Ростове")
-async def popular_places(message: Message):
-    user_id = message.from_user.id
-
-    # Подключаемся к базе данных
-    conn = await asyncpg.connect(DATABASE_URL)
-    user = await conn.fetchrow("SELECT latitude, longitude FROM users WHERE user_id = $1", user_id)
-    await conn.close()
-
-    # Проверяем, есть ли у пользователя сохраненная геолокация
-    if not user or user['latitude'] is None or user['longitude'] is None:
-        await message.answer("Пожалуйста, сначала отправьте вашу геолокацию.")
-        return
-
-    # Координаты пользователя
-    user_latitude = user['latitude']
-    user_longitude = user['longitude']
-    center_location = f"{user_latitude},{user_longitude}"
-
-    # Запрос к Foursquare API
-    url = "https://api.foursquare.com/v3/places/search"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": FOURSQUARE_API_KEY  # Ваш API ключ Foursquare
-    }
-    params = {
-        "ll": center_location,  # Координаты пользователя
-        "radius": 5000,  # Радиус поиска в метрах
-        "limit": 10,  # Количество мест
-        "categories": "13000"  # Категория "Еда и напитки" (можно изменить на нужную)
-    }
-
-    try:
-        # Выполняем запрос к Foursquare API
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()  # Проверяем статус ответа
-        data = response.json()
-
-        # Обрабатываем результаты
-        if data.get("results"):
-            response_text = "Популярные места рядом с вами:\n"
-            for idx, place in enumerate(data["results"], start=1):
-                name = place.get("name", "Неизвестное место")
-                address = place.get("location", {}).get("address", "Адрес не указан")
-                rating = place.get("rating", "Нет рейтинга")
-                response_text += f"{idx}. {name} - {address} (Рейтинг: {rating})\n"
-            await message.answer(response_text)
-        else:
-            await message.answer("Нет данных о популярных местах рядом с вами.")
-
-    except requests.exceptions.RequestException as e:
-        await message.answer(f"Ошибка при запросе к Foursquare API: {e}")
-
-
-
-# Обработчик запроса скидок и акций
-@router.message(F.text == "Скидки и акции")
-async def discounts(message: Message):
-    user_id = message.from_user.id
-
-    # Подключаемся к базе данных
-    conn = await asyncpg.connect(DATABASE_URL)
-    user = await conn.fetchrow("SELECT latitude, longitude FROM users WHERE user_id = $1", user_id)
-    await conn.close()
-
-    # Проверяем, есть ли у пользователя сохраненная геолокация
-    if not user or user['latitude'] is None or user['longitude'] is None:
-        await message.answer("Пожалуйста, сначала отправьте вашу геолокацию.")
-        return
-
-    # Координаты пользователя
-    user_latitude = user['latitude']
-    user_longitude = user['longitude']
-    center_location = f"{user_latitude},{user_longitude}"
-
-    # Запрос к Foursquare API для поиска скидок и акций
-    url = "https://api.foursquare.com/v3/places/search"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": FOURSQUARE_API_KEY  # Ваш API ключ Foursquare
-    }
-    params = {
-        "ll": center_location,  # Координаты пользователя
-        "radius": 5000,  # Радиус поиска в метрах
-        "limit": 10,  # Количество мест
-        "query": "discount"  # Ключевое слово для поиска скидок
-    }
-
-    try:
-        # Выполняем запрос к Foursquare API
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()  # Проверяем статус ответа
-        data = response.json()
-
-        # Обрабатываем результаты
-        if data.get("results"):
-            response_text = "Скидки и акции рядом с вами:\n"
-            for idx, place in enumerate(data["results"], start=1):
-                name = place.get("name", "Неизвестное место")
-                address = place.get("location", {}).get("address", "Адрес не указан")
-                discount_info = place.get("description", "Нет информации о скидке")
-                response_text += f"{idx}. {name} - {address} ({discount_info})\n"
-            await message.answer(response_text)
-        else:
-            await message.answer("Нет данных о скидках и акциях рядом с вами.")
-
-    except requests.exceptions.RequestException as e:
-        await message.answer(f"Ошибка при запросе к Foursquare API: {e}")
-
-
 class PreferencesForm(StatesGroup):
-    waiting_for_preferences = State() 
+    waiting_for_preferences = State()
 
 
 @router.message(F.text == "Указать предпочтения")
 async def set_preferences(message: Message, state: FSMContext):
-    await message.answer("Пожалуйста, напишите ваши предпочтения (например, 'люблю музеи и рестораны').")
-    await state.set_state(PreferencesForm.waiting_for_preferences)  # Переходим в состояние ожидания
+    await message.answer("Пожалуйста, напиши свои предпочтения (например, 'люблю музеи, рестораны, природу').")
+    await state.set_state(PreferencesForm.waiting_for_preferences)
 
 
-
-# Обработчик текстовых сообщений для сохранения предпочтений
 @router.message(F.text, PreferencesForm.waiting_for_preferences)
 async def save_preferences(message: Message, state: FSMContext):
     user_id = message.from_user.id
     preferences = message.text
 
-    # Анализируем предпочтения с помощью g4f
     try:
-        # Формируем запрос для g4f
         prompt = f"Определи типы мест из текста: '{preferences}'. Ответь кратко, перечисли типы мест через запятую. Исключай другие слова кроме типов мест."
         response = g4f.ChatCompletion.create(
-            model="gpt-4",  # Используем современную модель
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
         )
-        ai_preferences = response.strip()  # Получаем ответ от модели
+        ai_preferences = response.strip()
 
-        # Сохраняем предпочтения в базе данных
         conn = await asyncpg.connect(DATABASE_URL)
         await conn.execute("UPDATE users SET preferences = $1 WHERE user_id = $2", ai_preferences, user_id)
         await conn.close()
@@ -272,7 +171,41 @@ async def save_preferences(message: Message, state: FSMContext):
     except Exception as e:
         await message.answer(f"Ошибка при обработке предпочтений: {e}")
 
-    # Завершаем состояние
     await state.clear()
 
 
+@router.message()
+async def handle_text(message: Message):
+    query = message.text
+    user_id = message.from_user.id
+
+    # Получаем предпочтения пользователя из базы данных
+    conn = await asyncpg.connect(DATABASE_URL)
+    user = await conn.fetchrow("SELECT preferences FROM users WHERE user_id = $1", user_id)
+    await conn.close()
+
+    if not user or not user['preferences']:
+        await message.answer("Пожалуйста, сначала укажите свои предпочтения.")
+        return
+
+    preferences = user['preferences']
+
+    # Парсинг данных с 2ГИС
+    places = parse_2gis(query)
+
+    # Фильтрация по рейтингу (например, рейтинг >= 4.0)
+    filtered_places = [place for place in places if place["rating"] >= 4.0]
+
+    # Фильтрация по предпочтениям
+    filtered_by_preferences = []
+    for place in filtered_places:
+        if any(pref.lower() in place["name"].lower() for pref in preferences.split(", ")):
+            filtered_by_preferences.append(place)
+
+    if filtered_by_preferences:
+        response = "Найденные места по вашему запросу и предпочтениям:\n"
+        for idx, place in enumerate(filtered_by_preferences, start=1):
+            response += f"{idx}. {place['name']} - {place['address']} (Рейтинг: {place['rating']})\n"
+        await message.answer(response)
+    else:
+        await message.answer("По вашему запросу и предпочтениям ничего не найдено.")
