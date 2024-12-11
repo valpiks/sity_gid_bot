@@ -8,12 +8,11 @@ main = ReplyKeyboardMarkup(keyboard=
 [
 	[KeyboardButton(text="Популярные места в Ростове"),
 	KeyboardButton(text="Скидки и акции")],
-	[KeyboardButton(text="Отправить геолокацию", request_location=True),
-	KeyboardButton(text="Настройки")],
+	[KeyboardButton(text="Отправить геолокацию", request_location=True),],
 	[KeyboardButton(text="Подписаться на уведомления"),
 	KeyboardButton(text="Отписаться от уведомлений")],
 	[KeyboardButton(text="Указать предпочтения"),
-  KeyboardButton(text="Построить маршрут")]
+  KeyboardButton(text="Составить маршрут")]
 ],
 	resize_keyboard=True)
 

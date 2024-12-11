@@ -1,20 +1,14 @@
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 import asyncio
 import asyncpg
 from app.handlers import router
-from database.module import DATABASE_URL, create_table
-import httpx
+from database.module import DATABASE_URL
+from data_x import TOKEN
+from aiogram.fsm.storage.memory import MemoryStorage
 
-# Настройки прокси
-PROXY_AUTH = httpx.BasicAuth("username", "password")
-PROXY_URL = "http://207.246.87.152:11201"
-
-# Токен бота
-TOKEN = "7918689800:AAE5_tyQAg8EyH8l-0UGz-huHz42pI1_0WE"
 # Инициализация бота и диспетчера
-bot = Bot(token=TOKEN, proxy=PROXY_URL, proxy_auth=PROXY_AUTH, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+bot = Bot(token=TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 
 # Функция для отправки уведомлений
 async def send_notifications():
@@ -32,9 +26,10 @@ async def send_notifications():
 
 # Основная функция
 async def main():
-    await create_table()  # Создание таблицы (если нужно)
+    #await create_table()  # Создание таблицы (если нужно)
     # Регистрация роутера (если есть)
     dp.include_router(router)
+
     # Запуск диспетчера
     await dp.start_polling(bot)
 
