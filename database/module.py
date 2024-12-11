@@ -22,7 +22,7 @@ async def create_table():
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS events (
             id SERIAL PRIMARY KEY,
-            type VARCHAR(50) NOT NULL,
+            data TEXT NOT NULL,
             title VARCHAR(255) NOT NULL,
             description TEXT
         );

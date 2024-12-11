@@ -10,9 +10,9 @@ from app.URL import OPENROUTESERVICE_API_KEY, API_KEY
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from bs4 import BeautifulSoup
-
+import folium
 router = Router()
-
+import json
 
 # Функция для парсинга данных с 2ГИС
 def parse_2gis(query, city="Ростов-на-Дону"):
@@ -89,55 +89,65 @@ async def handle_location(message: Message):
     await message.answer("Ваша геолокация сохранена.")
 
 
-@router.message(F.text == "Построить маршрут")
+# Функция для построения маршрута по дороге через API 2ГИС
+def build_route_2gis(start_lat, start_lon, end_lat, end_lon):
+    url = "https://routing.api.2gis.com/carrouting/6.0.0/global"
+    params = {
+        "key": API_KEY,
+        "version": "1.0",
+        "locale": "ru",
+        "points": f"[{start_lon},{start_lat},{end_lon},{end_lat}]",
+        "type": "jam"  # Тип маршрута (с учетом пробок)
+    }
+
+    try:
+        response = requests.get(url, params=params)  # Используем GET-запрос
+        print("URL:", response.url)  # Вывод URL для отладки
+        print("Params:", params)  # Вывод параметров для отладки
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("result"):
+            route = data["result"][0]
+            duration = route["total_time"]  # Время в секундах
+            distance = route["total_distance"]  # Расстояние в метрах
+            return duration, distance, route["geometry"]  # Возвращаем геометрию маршрута
+        else:
+            return None, None, None
+    except Exception as e:
+        print(f"Ошибка при построении маршрута через API 2ГИС: {e}")
+        print("Response:", response.text)  # Вывод ответа для отладки
+        return None, None, None
+
+
+@router.message(F.text == "Составить маршрут")
 async def build_route(message: Message):
     user_id = message.from_user.id
+
+    # Получение координат пользователя из базы данных
     conn = await asyncpg.connect(DATABASE_URL)
-    user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+    user = await conn.fetchrow("SELECT latitude, longitude FROM users WHERE user_id = $1", user_id)
     await conn.close()
 
     if not user or user['latitude'] is None or user['longitude'] is None:
         await message.answer("Пожалуйста, сначала отправьте вашу геолокацию.")
         return
 
-    user_latitude = user['latitude']
-    user_longitude = user['longitude']
-    destination_latitude = 47.222078
-    destination_longitude = 39.720349
+    # Координаты пользователя
+    start_lat, start_lon = user['latitude'], user['longitude']
 
-    route_url = f"https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-    headers = {
-        "Authorization": OPENROUTESERVICE_API_KEY,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "coordinates": [
-            [user_longitude, user_latitude],
-            [destination_longitude, destination_latitude]
-        ]
-    }
+    # Конечная точка (например, Ростовский кремль)
+    end_lat, end_lon = 47.222078, 39.720349
 
-    try:
-        response = requests.post(route_url, headers=headers, json=data)
-        response.raise_for_status()
-        route_data = response.json()
+    # Построение маршрута
+    duration, distance, geometry = build_route_2gis(start_lat, start_lon, end_lat, end_lon)
 
-        if route_data.get("features"):
-            route = route_data["features"][0]["properties"]
-            duration = route["summary"]["duration"]
-            distance = route["summary"]["distance"]
-            duration_minutes = duration / 60
-            distance_km = distance / 1000
-            map_url = f"https://www.openstreetmap.org/directions?engine=osrm_car&route={user_latitude},{user_longitude}-{destination_latitude},{destination_longitude}"
-
-            await message.answer(f"Маршрут построен:\n"
-                                 f"Расстояние: {distance_km:.2f} км\n"
-                                 f"Время в пути: {duration_minutes:.2f} мин\n"
-                                 f"Ссылка на карту: {map_url}")
-        else:
-            await message.answer("Не удалось построить маршрут. Попробуйте позже.")
-    except requests.exceptions.RequestException as e:
-        await message.answer(f"Ошибка при построении маршрута: {e}")
+    if duration and distance:
+        await message.answer(f"Маршрут построен:\n"
+                             f"Расстояние: {distance / 1000:.2f} км\n"
+                             f"Время в пути: {duration / 60:.2f} мин")
+    else:
+        await message.answer("Не удалось построить маршрут.")
 
 
 class PreferencesForm(StatesGroup):
