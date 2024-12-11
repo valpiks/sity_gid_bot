@@ -4,16 +4,12 @@ import requests
 import g4f
 from aiogram import Router, F
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 import asyncpg
 from app.URL import OPENROUTESERVICE_API_KEY, FOURSQUARE_API_KEY
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-import os
-import folium
-import requests
-from folium.plugins import MarkerCluster
-import asyncio
+
 
 
 router = Router()
@@ -32,7 +28,7 @@ async def cmd_start(message: Message):
 
 
 
-@router.message(F.text == "Подписаться на уведомления")
+@router.message(Command("subscribe"))
 async def subscribe(message: Message):
     user_id = message.from_user.id
     conn = await asyncpg.connect(DATABASE_URL)
@@ -43,7 +39,7 @@ async def subscribe(message: Message):
 
 
 
-@router.message(F.text == "Отписаться от уведомлений")
+@router.message(Command("unsubscribe"))
 async def unsubscribe(message: Message):
     user_id = message.from_user.id
     conn = await asyncpg.connect(DATABASE_URL)
@@ -279,42 +275,4 @@ async def save_preferences(message: Message, state: FSMContext):
     # Завершаем состояние
     await state.clear()
 
-# Функция для получения мест с рейтингом (Foursquare API)
-def get_places_with_rating(location, radius=5000, limit=10):
-    url = "https://api.foursquare.com/v3/places/search"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": FOURSQUARE_API_KEY
-    }
-    params = {
-        "ll": f"{location[0]},{location[1]}",  # Координаты
-        "radius": radius,  # Радиус поиска в метрах
-        "limit": limit  # Количество мест
-    }
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()  # Проверяем статус ответа
-    data = response.json()
 
-    # Извлекаем места с рейтингом
-    places = []
-    for place in data.get("results", []):
-        name = place.get("name")
-        location = place.get("geocodes", {}).get("main", {})
-        latitude = location.get("latitude")
-        longitude = location.get("longitude")
-        rating = place.get("rating", 0)  # Рейтинг (если доступен)
-        if latitude and longitude:
-            places.append({
-                "name": name,
-                "latitude": latitude,
-                "longitude": longitude,
-                "rating": rating
-            })
-    return places
-
-
-
-
-@router.message(F.text)
-async def ignore_messages(message: Message):
-    await message.answer("Я вас не понимаю. Пожалуйста, используйте доступные команды.")
